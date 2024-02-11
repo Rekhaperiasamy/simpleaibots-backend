@@ -44,18 +44,23 @@ function buildRouter(env: Env): RouterType {
 		if (response.status === 200) {
 			const external_id = uuidv4();
 			const client = buildLibsqlClient(env);
-			await client.execute({
-				sql: "insert into wedding_speech (external_id, prompt, generated_text) values (?, ?, ?)",
-				args: [external_id, prompt.input, data.results[0].generated_text],
-			});
-			const data = await response.json()
+			const data = await response.json();
+			try {
+				await client.execute({
+					sql: "insert into wedding_speech (external_id, prompt, generated_text) values (?, ?, ?)",
+					args: [external_id, prompt.input, data.results[0].generated_text],
+				});
+			} catch (e) {
+				console.error(e);
+				return new Response("Error occured while inserting the data into database", { status: 500 });
+			}
 			const inferenceResult = {
 				'title': 'Wedding Speech',
 				'content': data.results[0].generated_text
 			}
 			return new Response(JSON.stringify(inferenceResult));
 		} else {
-			return new Response("Error occurred", { status: response.status });
+			return new Response("Error occurred", { status: 500 });
 		}
 
 	});
@@ -71,7 +76,12 @@ function buildRouter(env: Env): RouterType {
 				sql: 'SELECT * FROM wedding_speech WHERE external_id = ?',
 				args: [id],
 			});
-			return Response.json(rs);
+			const data = rs.toJSON();
+			const inferenceResult = {
+				'title': 'Wedding Speech',
+				'content': data.rows[0][3]
+			}
+			return Response.json(inferenceResult);
 		} catch (e) {
 			console.error(e);
 			return new Response("database fetch failed");
