@@ -1,12 +1,3 @@
-/**
- * Welcome to Cloudflare Workers! This is your first worker.
- *
- * - Run `npm run dev` in your terminal to start a development server
- * - Open a browser tab at http://localhost:8787/ to see your worker in action
- * - Run `npm run deploy` to publish your worker
- *
- * Learn more at https://developers.cloudflare.com/workers/
- */
 import { Client as LibsqlClient, createClient } from "@libsql/client/web";
 import { Router, RouterType } from "itty-router";
 import { v4 as uuidv4 } from 'uuid';
@@ -30,7 +21,7 @@ export default {
 
 function buildRouter(env: Env): RouterType {
 	const router = Router();
-	router.post("/generate", async (request) => {
+	router.post("/text", async (request) => {
 		/**
 		 * Replace url with the host you wish to send requests to
 		 * @param {string} url the URL to send the request to
@@ -51,21 +42,25 @@ function buildRouter(env: Env): RouterType {
 		};
 		const response = await fetch(url, init);
 		if (response.status === 200) {
-			const results = await prepareResponse(response, prompt, env);
-			return new Response(results, init);
+			const uuid_column = uuidv4();
+			const data = await response.json()
+			const inferenceResult = {
+				'title': 'Wedding Speech',
+				'content': data.results[0].generated_text
+			}
+			const client = buildLibsqlClient(env);
+			await client.execute({
+				sql: "insert into wedding_speech (external_id, prompt, generated_text) values (?, ?, ?)",
+				args: [uuid_column, prompt.input, data.results[0].generated_text],
+			});
+			return new Response(JSON.stringify(inferenceResult));
 		} else {
 			return new Response("Error occurred", { status: response.status });
 		}
 
 	});
 
-	router.get("/showalldata", async () => {
-		const client = buildLibsqlClient(env);
-		const rs = await client.execute("select * from customer_requests_data");
-		return Response.json(rs);
-	});
-
-	router.get('/getbyid/:id', async (request) => {
+	router.get('/text/:id', async (request) => {
 		const id = request.params.id;
 		const client = buildLibsqlClient(env);
 		if (id === undefined) {
@@ -73,7 +68,7 @@ function buildRouter(env: Env): RouterType {
 		}
 		try {
 			const rs = await client.execute({
-				sql: 'SELECT * FROM customer_requests_data WHERE uuid_no = ?',
+				sql: 'SELECT * FROM wedding_speech WHERE external_id = ?',
 				args: [id],
 			});
 			return Response.json(rs);
@@ -100,35 +95,4 @@ function buildLibsqlClient(env: Env): LibsqlClient {
 	}
 
 	return createClient({ url, authToken })
-}
-
-/**
- * gatherResponse awaits and returns a response body as a string.
- * Use await gatherResponse(..) in an async function to get the response body
- * @param {Response} response
- */
-async function prepareResponse(response: Response, prompt, env: Env) {
-	const { headers } = response;
-	const contentType = headers.get("content-type") || "";
-	if (contentType.includes("application/json")) {
-		const data = await response.json()
-		const inferenceResult = {
-			'title': 'Wedding Speech',
-			'content': data.results[0].generated_text
-		}
-		const client = buildLibsqlClient(env);
-		const uuid_column = uuidv4();
-		await client.execute({
-			sql: "insert into customer_requests_data (uuid_no, input, content) values (?, ?, ?)",
-			args: [uuid_column, prompt.input, data.results[0].generated_text],
-		});
-
-		return JSON.stringify(inferenceResult)
-	} else if (contentType.includes("application/text")) {
-		return response.text();
-	} else if (contentType.includes("text/html")) {
-		return response.text();
-	} else {
-		return response.text();
-	}
 }
