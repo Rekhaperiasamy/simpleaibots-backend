@@ -42,17 +42,17 @@ function buildRouter(env: Env): RouterType {
 		};
 		const response = await fetch(url, init);
 		if (response.status === 200) {
-			const uuid_column = uuidv4();
+			const external_id = uuidv4();
+			const client = buildLibsqlClient(env);
+			await client.execute({
+				sql: "insert into wedding_speech (external_id, prompt, generated_text) values (?, ?, ?)",
+				args: [external_id, prompt.input, data.results[0].generated_text],
+			});
 			const data = await response.json()
 			const inferenceResult = {
 				'title': 'Wedding Speech',
 				'content': data.results[0].generated_text
 			}
-			const client = buildLibsqlClient(env);
-			await client.execute({
-				sql: "insert into wedding_speech (external_id, prompt, generated_text) values (?, ?, ?)",
-				args: [uuid_column, prompt.input, data.results[0].generated_text],
-			});
 			return new Response(JSON.stringify(inferenceResult));
 		} else {
 			return new Response("Error occurred", { status: response.status });
