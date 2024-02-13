@@ -7,5 +7,4 @@ compatibility_date = "2024-01-29"
 # Docs: https://developers.cloudflare.com/workers/platform/environment-variables
 [vars]
 # MY_VARIABLE = "production_value"
-LIBSQL_DB_URL = "libsql://store-api-rekhaperiasamy.turso.io"
 DEEP_INFRA_HOST = "https://api.deepinfra.com/v1/inference/mistralai/Mixtral-8x7B-Instruct-v0.1"
