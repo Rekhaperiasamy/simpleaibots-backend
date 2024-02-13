@@ -1,14 +1,7 @@
-import { Client as LibsqlClient, createClient } from "@libsql/client/web";
+import { Env, getClient } from "./databaseUtils";
+import { selectWeddingSpeech, insertWeddingSpeech } from "./databaseUtils";
 import { Router, RouterType } from "itty-router";
-import { v4 as uuidv4 } from 'uuid';
-
-export interface Env {
-	LIBSQL_DB_URL?: string;
-	LIBSQL_DB_AUTH_TOKEN?: string;
-	DEEP_INFRA_HOST?: string;
-	DEEP_INFRA_AUTH_TOKEN?: string;
-	router?: RouterType;
-}
+import { v4 as uuidv4 } from "uuid";
 
 export default {
 	async fetch(request: Request, env: Env): Promise<Response> {
@@ -26,56 +19,65 @@ function buildRouter(env: Env): RouterType {
 		 * Replace url with the host you wish to send requests to
 		 * @param {string} url the URL to send the request to
 		 */
-		const prompt = await request.json() as { input: string };
-		const url = env.DEEP_INFRA_HOST?.trim();
-		const authToken = env.DEEP_INFRA_AUTH_TOKEN?.trim();
-		const body = {
-			input: prompt.input,
-		};
-		const init = {
-			body: JSON.stringify(body),
-			method: "POST",
-			headers: {
-				"content-type": "application/json;charset=UTF-8",
-				"Authorization": `Bearer ${authToken}`
-			},
-		};
-		const response = await fetch(url, init);
-		if (response.status === 200) {
+		try {
+			const prompt = await request.json() as { input: string };
+			const url = env.DEEP_INFRA_HOST?.trim();
+			const authToken = env.DEEP_INFRA_AUTH_TOKEN?.trim();
+			const body = {
+				input: prompt.input,
+			};
+			const response = await fetch(url, {
+				body: JSON.stringify(body),
+				method: "POST",
+				headers: {
+					"content-type": "application/json;charset=UTF-8",
+					"Authorization": `Bearer ${authToken}`
+				},
+			});
+
+			if (response.status !== 200) {
+				console.error("AI Api returned response " + response.status);
+				return new Response("Error occurred", { status: 500 });
+			}
+
 			const external_id = uuidv4();
-			const client = buildLibsqlClient(env);
+			const dbClient = getClient(env)
 			const data = await response.json();
 			try {
-				await client.execute({
-					sql: "insert into wedding_speech (external_id, prompt, generated_text) values (?, ?, ?)",
-					args: [external_id, prompt.input, data.results[0].generated_text],
-				});
+				await dbClient.execute(insertWeddingSpeech(external_id, prompt.input, data.results[0].generated_text));
 			} catch (e) {
 				console.error(e);
-				return new Response("Error occured while inserting the data into database", { status: 500 });
+				return new Response("Internal server error", { status: 500 });
 			}
 			const inferenceResult = {
 				'title': 'Wedding Speech',
 				'content': data.results[0].generated_text
 			}
 			return new Response(JSON.stringify(inferenceResult));
-		} else {
-			return new Response("Error occurred", { status: 500 });
+
+		} catch (e) {
+			console.error(e);
+			return new Response("Internal server error", { status: 500 });
 		}
 
 	});
 
 	router.get('/text/:id', async (request) => {
-		const id = request.params.id;
-		const client = buildLibsqlClient(env);
-		if (id === undefined) {
-			return new Response("bad", { status: 400 });
-		}
 		try {
-			const rs = await client.execute({
-				sql: 'SELECT * FROM wedding_speech WHERE external_id = ?',
-				args: [id],
-			});
+			const id = request.params.id;
+			const dbClient = getClient(env);
+			if (id === undefined) {
+				return new Response("bad", { status: 400 });
+			}
+
+			let rs;
+			try {
+				rs = await dbClient.execute(selectWeddingSpeech(id));
+			} catch (e) {
+				console.error(e);
+				return new Response("Internal server error", { status: 500 });
+			}
+
 			const data = rs.toJSON();
 			const inferenceResult = {
 				'title': 'Wedding Speech',
@@ -84,25 +86,11 @@ function buildRouter(env: Env): RouterType {
 			return Response.json(inferenceResult);
 		} catch (e) {
 			console.error(e);
-			return new Response("database fetch failed");
+			return new Response("Internal server error", { status: 500 });
 		}
 	});
 
 	router.all("*", () => new Response("Not Found.", { status: 404 }));
 
 	return router;
-}
-
-function buildLibsqlClient(env: Env): LibsqlClient {
-	const url = env.LIBSQL_DB_URL?.trim();
-	if (url === undefined) {
-		throw new Error("LIBSQL_DB_URL env var is not defined");
-	}
-
-	const authToken = env.LIBSQL_DB_AUTH_TOKEN?.trim();
-	if (authToken == undefined) {
-		throw new Error("LIBSQL_DB_AUTH_TOKEN env var is not defined");
-	}
-
-	return createClient({ url, authToken })
 }
